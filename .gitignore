@@ -56,3 +56,6 @@ blog.db
 # Build artifacts
 dist/
 build/
+
+# Task tracking
+tasks.json
