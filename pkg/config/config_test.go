@@ -2,12 +2,29 @@ package config_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/artorias501/blog-service/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// createTempYAMLConfig creates a temporary YAML config file with the given content.
+// Returns the file path and a cleanup function.
+func createTempYAMLConfig(t *testing.T, content string) (string, func()) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	err := os.WriteFile(configPath, []byte(content), 0644)
+	require.NoError(t, err, "Failed to create temp config file")
+
+	return configPath, func() {
+		// t.TempDir() handles cleanup automatically
+	}
+}
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any existing env vars
@@ -23,7 +40,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "localhost:6379", cfg.Redis.Addr)
 	assert.Equal(t, "", cfg.Redis.Password)
 	assert.Equal(t, 0, cfg.Redis.DB)
-	assert.Equal(t, "", cfg.Auth.AdminToken)
+	assert.Equal(t, "artorias501", cfg.Auth.AdminToken)
 }
 
 func TestLoad_EnvironmentOverrides(t *testing.T) {
@@ -203,4 +220,293 @@ func TestCORSConfig_Wildcard(t *testing.T) {
 
 	assert.True(t, cfg.CORS.IsOriginAllowed("http://any-origin.com"))
 	assert.True(t, cfg.CORS.IsOriginAllowed("http://localhost:3000"))
+}
+
+// ============================================================================
+// YAML Loading Tests
+// ============================================================================
+
+func TestLoad_YAMLFile(t *testing.T) {
+	os.Clearenv()
+
+	yamlContent := `
+server:
+  port: "9090"
+  environment: "staging"
+database:
+  path: "/data/test.db"
+redis:
+  addr: "redis-server:6379"
+  password: "redis-pass"
+  db: 3
+auth:
+  admin_token: "yaml-token"
+cors:
+  allowed_origins:
+    - "http://localhost:8080"
+    - "http://example.com"
+  allowed_methods:
+    - "GET"
+    - "POST"
+  allowed_headers:
+    - "Content-Type"
+  allow_credentials: true
+  max_age: 3600
+log:
+  format: "json"
+  level: "debug"
+`
+	configPath, cleanup := createTempYAMLConfig(t, yamlContent)
+	defer cleanup()
+
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+
+	// Verify YAML values were loaded
+	assert.Equal(t, "9090", cfg.Server.Port)
+	assert.Equal(t, "staging", cfg.Server.Environment)
+	assert.Equal(t, "/data/test.db", cfg.Database.Path)
+	assert.Equal(t, "redis-server:6379", cfg.Redis.Addr)
+	assert.Equal(t, "redis-pass", cfg.Redis.Password)
+	assert.Equal(t, 3, cfg.Redis.DB)
+	assert.Equal(t, "yaml-token", cfg.Auth.AdminToken)
+	assert.Len(t, cfg.CORS.AllowedOrigins, 2)
+	assert.Contains(t, cfg.CORS.AllowedOrigins, "http://localhost:8080")
+	assert.Contains(t, cfg.CORS.AllowedOrigins, "http://example.com")
+	assert.Len(t, cfg.CORS.AllowedMethods, 2)
+	assert.True(t, cfg.CORS.AllowCredentials)
+	assert.Equal(t, 3600, cfg.CORS.MaxAge)
+	assert.Equal(t, "json", cfg.Log.Format)
+	assert.Equal(t, "debug", cfg.Log.Level)
+}
+
+func TestLoad_YAMLFile_PartialConfig(t *testing.T) {
+	os.Clearenv()
+
+	// YAML with only some fields set - should use defaults for missing fields
+	yamlContent := `
+server:
+  port: "7070"
+database:
+  path: "custom.db"
+`
+	configPath, cleanup := createTempYAMLConfig(t, yamlContent)
+	defer cleanup()
+
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+
+	// Verify specified values
+	assert.Equal(t, "7070", cfg.Server.Port)
+	assert.Equal(t, "custom.db", cfg.Database.Path)
+
+	// Verify defaults for unspecified fields
+	assert.Equal(t, "development", cfg.Server.Environment)
+	assert.Equal(t, "localhost:6379", cfg.Redis.Addr)
+	assert.Equal(t, "artorias501", cfg.Auth.AdminToken)
+}
+
+func TestLoad_YAMLFile_InvalidYAML(t *testing.T) {
+	os.Clearenv()
+
+	yamlContent := `
+server:
+  port: "8080"
+  invalid yaml content here
+    broken indentation
+`
+	configPath, cleanup := createTempYAMLConfig(t, yamlContent)
+	defer cleanup()
+
+	_, err := config.Load(configPath)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse config file")
+}
+
+func TestLoad_YAMLFile_NonExistent(t *testing.T) {
+	os.Clearenv()
+
+	// Loading from non-existent path should use defaults
+	cfg, err := config.Load("/non/existent/path/config.yaml")
+	require.NoError(t, err)
+
+	// Should use defaults
+	assert.Equal(t, "8080", cfg.Server.Port)
+	assert.Equal(t, "development", cfg.Server.Environment)
+	assert.Equal(t, "blog.db", cfg.Database.Path)
+}
+
+func TestLoad_EmptyConfigPath(t *testing.T) {
+	os.Clearenv()
+
+	// Empty config path should use default "config.yaml"
+	cfg, err := config.Load("")
+	require.NoError(t, err)
+
+	// Should use defaults (since config.yaml may or may not exist)
+	assert.NotNil(t, cfg)
+}
+
+// ============================================================================
+// Environment Variable Override Tests
+// ============================================================================
+
+func TestLoad_EnvOverridesYAML(t *testing.T) {
+	os.Clearenv()
+
+	yamlContent := `
+server:
+  port: "9090"
+  environment: "staging"
+database:
+  path: "/data/yaml.db"
+redis:
+  addr: "yaml-redis:6379"
+  password: "yaml-pass"
+  db: 5
+auth:
+  admin_token: "yaml-token"
+`
+	configPath, cleanup := createTempYAMLConfig(t, yamlContent)
+	defer cleanup()
+
+	// Set environment variables that should override YAML values
+	os.Setenv("SERVER_PORT", "3000")
+	os.Setenv("SERVER_ENVIRONMENT", "production")
+	os.Setenv("DATABASE_PATH", "/data/env.db")
+	os.Setenv("REDIS_ADDR", "env-redis:6379")
+	os.Setenv("REDIS_PASSWORD", "env-pass")
+	os.Setenv("REDIS_DB", "10")
+	os.Setenv("ADMIN_TOKEN", "env-token")
+
+	defer os.Clearenv()
+
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+
+	// Environment variables should override YAML values
+	assert.Equal(t, "3000", cfg.Server.Port)
+	assert.Equal(t, "production", cfg.Server.Environment)
+	assert.Equal(t, "/data/env.db", cfg.Database.Path)
+	assert.Equal(t, "env-redis:6379", cfg.Redis.Addr)
+	assert.Equal(t, "env-pass", cfg.Redis.Password)
+	assert.Equal(t, 10, cfg.Redis.DB)
+	assert.Equal(t, "env-token", cfg.Auth.AdminToken)
+}
+
+func TestLoad_EnvOverridesYAML_CORS(t *testing.T) {
+	os.Clearenv()
+
+	yamlContent := `
+cors:
+  allowed_origins:
+    - "http://yaml-origin.com"
+  allowed_methods:
+    - "GET"
+  allow_credentials: false
+  max_age: 1000
+`
+	configPath, cleanup := createTempYAMLConfig(t, yamlContent)
+	defer cleanup()
+
+	// Set CORS environment variables
+	os.Setenv("CORS_ALLOWED_ORIGINS", "http://env-origin.com,http://another.com")
+	os.Setenv("CORS_ALLOWED_METHODS", "POST,PUT")
+	os.Setenv("CORS_ALLOW_CREDENTIALS", "true")
+	os.Setenv("CORS_MAX_AGE", "5000")
+
+	defer os.Clearenv()
+
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+
+	assert.Len(t, cfg.CORS.AllowedOrigins, 2)
+	assert.Contains(t, cfg.CORS.AllowedOrigins, "http://env-origin.com")
+	assert.Contains(t, cfg.CORS.AllowedOrigins, "http://another.com")
+	assert.Len(t, cfg.CORS.AllowedMethods, 2)
+	assert.Contains(t, cfg.CORS.AllowedMethods, "POST")
+	assert.Contains(t, cfg.CORS.AllowedMethods, "PUT")
+	assert.True(t, cfg.CORS.AllowCredentials)
+	assert.Equal(t, 5000, cfg.CORS.MaxAge)
+}
+
+func TestLoad_EnvOverridesYAML_Log(t *testing.T) {
+	os.Clearenv()
+
+	yamlContent := `
+log:
+  format: "json"
+  level: "debug"
+`
+	configPath, cleanup := createTempYAMLConfig(t, yamlContent)
+	defer cleanup()
+
+	// Set log environment variables
+	os.Setenv("LOG_FORMAT", "text")
+	os.Setenv("LOG_LEVEL", "error")
+
+	defer os.Clearenv()
+
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, "text", cfg.Log.Format)
+	assert.Equal(t, "error", cfg.Log.Level)
+}
+
+func TestLoad_EnvPartialOverride(t *testing.T) {
+	os.Clearenv()
+
+	yamlContent := `
+server:
+  port: "9090"
+  environment: "staging"
+database:
+  path: "/data/yaml.db"
+`
+	configPath, cleanup := createTempYAMLConfig(t, yamlContent)
+	defer cleanup()
+
+	// Only override some values
+	os.Setenv("SERVER_PORT", "3000")
+	// SERVER_ENVIRONMENT not set - should use YAML value
+
+	defer os.Clearenv()
+
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+
+	// Overridden by env
+	assert.Equal(t, "3000", cfg.Server.Port)
+	// From YAML
+	assert.Equal(t, "staging", cfg.Server.Environment)
+	assert.Equal(t, "/data/yaml.db", cfg.Database.Path)
+}
+
+// ============================================================================
+// Auto-creation Tests
+// ============================================================================
+
+func TestLoad_NoConfigFile_UsesDefaults(t *testing.T) {
+	os.Clearenv()
+
+	// Use a non-existent path
+	cfg, err := config.Load("/tmp/nonexistent-config-12345.yaml")
+	require.NoError(t, err)
+
+	// Should use all defaults
+	assert.Equal(t, "8080", cfg.Server.Port)
+	assert.Equal(t, "development", cfg.Server.Environment)
+	assert.Equal(t, "blog.db", cfg.Database.Path)
+	assert.Equal(t, "localhost:6379", cfg.Redis.Addr)
+	assert.Equal(t, "artorias501", cfg.Auth.AdminToken)
+}
+
+func TestLoad_DefaultConfigPath(t *testing.T) {
+	os.Clearenv()
+
+	// Load without specifying path - should use "config.yaml" if exists, or defaults
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
 }
