@@ -1,0 +1,49 @@
+# Blog Service Configuration
+# This file contains default configuration values for the blog service.
+
+# Server configuration
+server:
+  port: "8080"
+  environment: "development"
+
+# Database configuration
+database:
+  path: "blog.db"
+
+# Redis configuration
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+  # TTL configurations for different cache types
+  ttl:
+    post: "30m"           # TTL for individual post cache
+    post_list: "5m"       # TTL for post list cache
+    tag: "60m"            # TTL for tag cache
+    comment: "15m"        # TTL for comment cache
+    comment_count: "5m"   # TTL for comment count cache
+
+# Authentication configuration
+auth:
+  admin_token: "artorias501"
+
+# CORS configuration
+cors:
+  allowed_origins:
+    - "*"
+  allowed_methods:
+    - "GET"
+    - "POST"
+    - "PUT"
+    - "DELETE"
+    - "OPTIONS"
+  allowed_headers:
+    - "Content-Type"
+    - "Authorization"
+  allow_credentials: false
+  max_age: 86400
+
+# Logging configuration
+log:
+  format: "text"  # "json" or "text"
+  level: "info"   # "debug", "info", "warn", "error"
