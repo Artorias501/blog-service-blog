@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -82,11 +83,21 @@ type DatabaseConfig struct {
 	Path string
 }
 
+// RedisTTLConfig holds TTL configurations for Redis cache.
+type RedisTTLConfig struct {
+	Post         time.Duration
+	PostList     time.Duration
+	Tag          time.Duration
+	Comment      time.Duration
+	CommentCount time.Duration
+}
+
 // RedisConfig holds Redis-related configuration.
 type RedisConfig struct {
 	Addr     string
 	Password string
 	DB       int
+	TTL      RedisTTLConfig
 }
 
 // AuthConfig holds authentication-related configuration.
@@ -162,6 +173,13 @@ func getDefaultConfig() *Config {
 			Addr:     "localhost:6379",
 			Password: "",
 			DB:       0,
+			TTL: RedisTTLConfig{
+				Post:         30 * time.Minute,
+				PostList:     5 * time.Minute,
+				Tag:          60 * time.Minute,
+				Comment:      15 * time.Minute,
+				CommentCount: 5 * time.Minute,
+			},
 		},
 		Auth: AuthConfig{
 			AdminToken: "artorias501",
@@ -196,6 +214,32 @@ func applyYAMLConfig(cfg *Config, yc *yamlConfig) {
 	}
 	cfg.Redis.Password = yc.Redis.Password
 	cfg.Redis.DB = yc.Redis.DB
+	// Apply Redis TTL configuration
+	if yc.Redis.TTL.Post != "" {
+		if d, err := parseDuration(yc.Redis.TTL.Post); err == nil {
+			cfg.Redis.TTL.Post = d
+		}
+	}
+	if yc.Redis.TTL.PostList != "" {
+		if d, err := parseDuration(yc.Redis.TTL.PostList); err == nil {
+			cfg.Redis.TTL.PostList = d
+		}
+	}
+	if yc.Redis.TTL.Tag != "" {
+		if d, err := parseDuration(yc.Redis.TTL.Tag); err == nil {
+			cfg.Redis.TTL.Tag = d
+		}
+	}
+	if yc.Redis.TTL.Comment != "" {
+		if d, err := parseDuration(yc.Redis.TTL.Comment); err == nil {
+			cfg.Redis.TTL.Comment = d
+		}
+	}
+	if yc.Redis.TTL.CommentCount != "" {
+		if d, err := parseDuration(yc.Redis.TTL.CommentCount); err == nil {
+			cfg.Redis.TTL.CommentCount = d
+		}
+	}
 	if yc.Auth.AdminToken != "" {
 		cfg.Auth.AdminToken = yc.Auth.AdminToken
 	}
@@ -280,6 +324,12 @@ func parseCommaSeparated(value string) []string {
 		}
 	}
 	return result
+}
+
+// parseDuration parses a duration string (e.g., "30m", "1h", "5s").
+// Supports: s (seconds), m (minutes), h (hours).
+func parseDuration(value string) (time.Duration, error) {
+	return time.ParseDuration(value)
 }
 
 // Validate validates the configuration.

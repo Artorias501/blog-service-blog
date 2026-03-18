@@ -44,11 +44,11 @@ type Application struct {
 
 func main() {
 	// Parse command line flags
-	flag.String("config", "", "Path to configuration file")
+	configPath := flag.String("config", "./config.yaml", "Path to configuration file")
 	flag.Parse()
 
 	// Load configuration
-	cfg, err := config.Load()
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		// Fail fast if required configuration is missing
 		fmt.Fprintf(os.Stderr, "ERROR: Failed to load configuration: %v\n", err)
@@ -62,6 +62,7 @@ func main() {
 	log.Info("starting blog service",
 		slog.String("port", cfg.Server.Port),
 		slog.String("environment", cfg.Server.Environment),
+		slog.String("config_file", *configPath),
 	)
 
 	// Initialize application
@@ -118,9 +119,14 @@ func InitializeApplication(cfg *config.Config, log *slog.Logger) (*Application, 
 
 	// Initialize Redis client (optional - service can run without Redis)
 	redisClient, err := cache.NewRedisClient(cache.Config{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
+		Addr:            cfg.Redis.Addr,
+		Password:        cfg.Redis.Password,
+		DB:              cfg.Redis.DB,
+		PostTTL:         cfg.Redis.TTL.Post,
+		PostListTTL:     cfg.Redis.TTL.PostList,
+		TagTTL:          cfg.Redis.TTL.Tag,
+		CommentTTL:      cfg.Redis.TTL.Comment,
+		CommentCountTTL: cfg.Redis.TTL.CommentCount,
 	})
 	if err != nil {
 		log.Warn("Redis connection failed, running without cache", slog.Any("error", err))

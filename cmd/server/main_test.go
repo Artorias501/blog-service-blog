@@ -229,3 +229,61 @@ func TestInitializeLogger(t *testing.T) {
 		})
 	}
 }
+
+// TestInitializeApplication_RedisTTL tests that Redis TTL config is properly used.
+func TestInitializeApplication_RedisTTL(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Port:        "8080",
+			Environment: "test",
+		},
+		Database: config.DatabaseConfig{
+			Path: t.TempDir() + "/test.db",
+		},
+		Redis: config.RedisConfig{
+			Addr:     "localhost:6379",
+			Password: "",
+			DB:       0,
+			TTL: config.RedisTTLConfig{
+				Post:         45 * time.Minute,
+				PostList:     10 * time.Minute,
+				Tag:          2 * time.Hour,
+				Comment:      30 * time.Minute,
+				CommentCount: 15 * time.Minute,
+			},
+		},
+		Auth: config.AuthConfig{
+			AdminToken: "test-token",
+		},
+		CORS: config.CORSConfig{
+			AllowedOrigins: []string{"*"},
+			AllowedMethods: []string{"GET", "POST", "PUT", "DELETE"},
+		},
+		Log: config.LogConfig{
+			Format: "text",
+			Level:  "info",
+		},
+	}
+
+	logger := initializeLogger(cfg)
+	require.NotNil(t, logger)
+
+	app, err := InitializeApplication(cfg, logger)
+	require.NoError(t, err)
+	require.NotNil(t, app)
+
+	// Verify Redis client has correct TTL config (if Redis is available)
+	if app.Redis != nil {
+		redisConfig := app.Redis.Config()
+		assert.Equal(t, 45*time.Minute, redisConfig.PostTTL)
+		assert.Equal(t, 10*time.Minute, redisConfig.PostListTTL)
+		assert.Equal(t, 2*time.Hour, redisConfig.TagTTL)
+		assert.Equal(t, 30*time.Minute, redisConfig.CommentTTL)
+		assert.Equal(t, 15*time.Minute, redisConfig.CommentCountTTL)
+	}
+
+	// Cleanup
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = app.Shutdown(ctx)
+}

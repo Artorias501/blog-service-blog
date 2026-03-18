@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/artorias501/blog-service/pkg/config"
 	"github.com/stretchr/testify/assert"
@@ -509,4 +510,53 @@ func TestLoad_DefaultConfigPath(t *testing.T) {
 	cfg, err := config.Load()
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
+}
+
+// ============================================================================
+// Redis TTL Configuration Tests
+// ============================================================================
+
+func TestLoad_YAMLFile_RedisTTL(t *testing.T) {
+	os.Clearenv()
+
+	yamlContent := `
+server:
+  port: "9090"
+database:
+  path: "/data/test.db"
+redis:
+  addr: "redis-server:6379"
+  ttl:
+    post: "45m"
+    post_list: "10m"
+    tag: "2h"
+    comment: "30m"
+    comment_count: "15m"
+`
+	configPath, cleanup := createTempYAMLConfig(t, yamlContent)
+	defer cleanup()
+
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+
+	// Verify TTL values were loaded correctly
+	assert.Equal(t, 45*time.Minute, cfg.Redis.TTL.Post)
+	assert.Equal(t, 10*time.Minute, cfg.Redis.TTL.PostList)
+	assert.Equal(t, 2*time.Hour, cfg.Redis.TTL.Tag)
+	assert.Equal(t, 30*time.Minute, cfg.Redis.TTL.Comment)
+	assert.Equal(t, 15*time.Minute, cfg.Redis.TTL.CommentCount)
+}
+
+func TestLoad_DefaultRedisTTL(t *testing.T) {
+	os.Clearenv()
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	// Verify default TTL values
+	assert.Equal(t, 30*time.Minute, cfg.Redis.TTL.Post)
+	assert.Equal(t, 5*time.Minute, cfg.Redis.TTL.PostList)
+	assert.Equal(t, 60*time.Minute, cfg.Redis.TTL.Tag)
+	assert.Equal(t, 15*time.Minute, cfg.Redis.TTL.Comment)
+	assert.Equal(t, 5*time.Minute, cfg.Redis.TTL.CommentCount)
 }
